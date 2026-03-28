@@ -19,6 +19,7 @@ class PopupController {
     await this.loadSettings();
     await this.updateStats();
     this.setupEventListeners();
+    this.listenForStatsUpdates();
   }
 
   private async loadSettings() {
@@ -44,20 +45,27 @@ class PopupController {
 
       await chrome.storage.local.set({ enabled });
 
-      if (tab.id) {
-        chrome.tabs.sendMessage(tab.id, {
-          action: 'toggleHighlighting',
-          enabled,
-        });
-      }
-
       this.updateStatus(enabled);
 
       if (!enabled) {
         this.cveCountElement.textContent = '0';
         chrome.action.setBadgeText({ text: '' });
-      } else {
-        await this.updateStats();
+      }
+
+      if (tab.id) {
+        chrome.tabs.sendMessage(
+          tab.id,
+          { action: 'toggleHighlighting', enabled },
+          (response) => {
+            if (chrome.runtime.lastError) {
+              // Content script not available
+              return;
+            }
+            if (enabled && response && response.count !== undefined) {
+              this.displayStats(response.count, response.typeCounts);
+            }
+          }
+        );
       }
     });
   }
@@ -81,34 +89,59 @@ class PopupController {
 
       if (tab.id) {
         chrome.tabs.sendMessage(tab.id, { action: 'getStats' }, (response) => {
+          if (chrome.runtime.lastError) {
+            return;
+          }
           if (response && response.count !== undefined) {
-            const { count, typeCounts } = response;
-
-            // Show total or breakdown based on type counts
-            if (
-              typeCounts &&
-              (typeCounts.advisory > 0 || typeCounts.exploit > 0)
-            ) {
-              const parts: string[] = [];
-              if (typeCounts.cve > 0) {
-                parts.push(`${typeCounts.cve} CVE`);
-              }
-              if (typeCounts.advisory > 0) {
-                parts.push(`${typeCounts.advisory} Adv`);
-              }
-              if (typeCounts.exploit > 0) {
-                parts.push(`${typeCounts.exploit} Exp`);
-              }
-              this.cveCountElement.textContent = parts.join(' | ') || '0';
-            } else {
-              this.cveCountElement.textContent = count.toString();
-            }
+            this.displayStats(response.count, response.typeCounts);
           }
         });
       }
     } catch (error) {
       console.error('Error updating stats:', error);
     }
+  }
+
+  private displayStats(
+    count: number,
+    typeCounts?: { cve: number; advisory: number; exploit: number }
+  ) {
+    if (typeCounts && (typeCounts.advisory > 0 || typeCounts.exploit > 0)) {
+      const parts: string[] = [];
+      if (typeCounts.cve > 0) {
+        parts.push(`${typeCounts.cve} CVE`);
+      }
+      if (typeCounts.advisory > 0) {
+        parts.push(`${typeCounts.advisory} Adv`);
+      }
+      if (typeCounts.exploit > 0) {
+        parts.push(`${typeCounts.exploit} Exp`);
+      }
+      this.cveCountElement.textContent = parts.join(' | ') || '0';
+    } else {
+      this.cveCountElement.textContent = count.toString();
+    }
+  }
+
+  private listenForStatsUpdates() {
+    chrome.runtime.onMessage.addListener((request, sender) => {
+      // Only handle updateBadge from content scripts (they have sender.tab)
+      if (
+        request.action === 'updateBadge' &&
+        sender.tab &&
+        request.count !== undefined
+      ) {
+        // Verify it's from the active tab
+        chrome.tabs.query(
+          { active: true, currentWindow: true },
+          ([activeTab]) => {
+            if (activeTab && activeTab.id === sender.tab?.id) {
+              this.displayStats(request.count, request.typeCounts);
+            }
+          }
+        );
+      }
+    });
   }
 
   private updateStatus(enabled: boolean) {

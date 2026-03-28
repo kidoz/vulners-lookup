@@ -273,6 +273,7 @@ export class DOMScanner {
     chrome.runtime.sendMessage({
       action: 'updateBadge',
       count: this.highlightedBulletins.size,
+      typeCounts: { ...this.bulletinTypeCounts },
     });
   }
 
@@ -556,6 +557,7 @@ export class DOMScanner {
       chrome.runtime.sendMessage({
         action: 'updateBadge',
         count: this.highlightedBulletins.size,
+        typeCounts: { ...this.bulletinTypeCounts },
       });
     }
 
@@ -656,6 +658,7 @@ export class DOMScanner {
     chrome.runtime.sendMessage({
       action: 'updateBadge',
       count: 0,
+      typeCounts: { cve: 0, advisory: 0, exploit: 0 },
     });
   }
 }

@@ -765,6 +765,7 @@ describe('CVEHighlighter Content Script', () => {
         expect(mockChrome.runtime.sendMessage).toHaveBeenCalledWith({
           action: 'updateBadge',
           count: 0,
+          typeCounts: { cve: 0, advisory: 0, exploit: 0 },
         });
       });
     });

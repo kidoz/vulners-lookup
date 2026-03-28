@@ -34,7 +34,12 @@ const configs: BuildOptions[] = [
   {
     entryPoints: ['src/popup.ts'],
     outfile: 'dist/popup.js',
-    ...commonOptions,
+    bundle: true,
+    sourcemap: !isMinify,
+    minify: isMinify,
+    target: 'es2020',
+    format: 'iife', // IIFE for popup scripts (loaded via <script>, not <script type="module">)
+    logLevel: 'info',
   },
   {
     entryPoints: ['src/history-hook.ts'],

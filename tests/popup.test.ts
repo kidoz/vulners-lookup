@@ -319,10 +319,11 @@ describe('Popup Module', () => {
 
         await new Promise((resolve) => setTimeout(resolve, 10));
 
-        expect(mockChrome.tabs.sendMessage).toHaveBeenCalledWith(1, {
-          action: 'toggleHighlighting',
-          enabled: true,
-        });
+        expect(mockChrome.tabs.sendMessage).toHaveBeenCalledWith(
+          1,
+          { action: 'toggleHighlighting', enabled: true },
+          expect.any(Function)
+        );
       });
 
       it('should clear badge when disabled', async () => {
