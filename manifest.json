@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Vulners Lookup",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Automatically detect and highlight CVE IDs on web pages with vulnerability information from Vulners.com",
   "icons": {
     "16": "assets/icon-16.png",
