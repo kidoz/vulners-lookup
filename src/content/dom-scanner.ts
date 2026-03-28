@@ -87,7 +87,12 @@ export class DOMScanner {
               // Parse pattern string like "/CVE-\\d{4}-\\d{4,7}/gi"
               const match = patternStr.match(/^\/(.+)\/([gimuy]*)$/);
               if (match) {
-                return new RegExp(match[1], match[2]);
+                // Strip \b word boundaries — they break matching when identifiers
+                // follow JSON escape sequences like \n (literal backslash+n),
+                // because 'n' is a word character and \b fails between two \w chars.
+                // The patterns are specific enough to avoid false positives without \b.
+                const source = match[1].replace(/\\b/g, '');
+                return new RegExp(source, match[2]);
               } else {
                 // Fallback: treat as plain pattern with 'gi' flags
                 return new RegExp(patternStr, 'gi');
@@ -100,6 +105,7 @@ export class DOMScanner {
           .filter(Boolean);
         this.patternsLoaded = true;
         console.log(`Loaded ${this.patterns.length} patterns from API`);
+        this.buildCombinedPattern();
         return;
       }
     } catch (error) {

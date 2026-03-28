@@ -518,6 +518,134 @@ describe('CVEHighlighter Content Script', () => {
         expect(domScanner.isPatternsLoaded()).toBe(true);
       });
 
+      it('should strip \\b word boundaries from API patterns', async () => {
+        const mockPatterns = {
+          patterns: [
+            '/\\bCVE-\\d{4}-\\d{4,7}\\b/gi',
+            '/\\bGHSA-[0-9A-Za-z]{4}-[0-9A-Za-z]{4}-[0-9A-Za-z]{4}\\b/gi',
+          ],
+        };
+        (mockChrome.runtime.sendMessage as jest.Mock).mockResolvedValueOnce(
+          mockPatterns
+        );
+
+        await domScanner.loadPatterns();
+        expect(domScanner.isPatternsLoaded()).toBe(true);
+
+        // Verify \\b is removed from pattern sources
+        const patterns = (domScanner as any).patterns as RegExp[];
+        patterns.forEach((p: RegExp) => {
+          expect(p.source).not.toContain('\\b');
+        });
+      });
+
+      it('should match CVEs after literal \\n in JSON text with stripped boundaries', async () => {
+        const mockPatterns = {
+          patterns: ['/\\bCVE-\\d{4}-\\d{4,7}\\b/gi'],
+        };
+        (mockChrome.runtime.sendMessage as jest.Mock).mockResolvedValueOnce(
+          mockPatterns
+        );
+
+        await domScanner.loadPatterns();
+
+        // Literal \n as it appears in raw JSON displayed in Chrome
+        const jsonText =
+          '"aliases":"CVE-2026-2558\\nCVE-2026-25581\\nCVE-2026-25580"';
+        expect(domScanner.hasMatchingPattern(jsonText)).toBe(true);
+      });
+
+      it('should match GHSAs after literal \\n in JSON text with stripped boundaries', async () => {
+        const mockPatterns = {
+          patterns: [
+            '/\\bGHSA-[0-9A-Za-z]{4}-[0-9A-Za-z]{4}-[0-9A-Za-z]{4}\\b/gi',
+          ],
+        };
+        (mockChrome.runtime.sendMessage as jest.Mock).mockResolvedValueOnce(
+          mockPatterns
+        );
+
+        await domScanner.loadPatterns();
+
+        const jsonText =
+          '"aliases":"CVE-2026-2558\\nGHSA-25fq-6qgg-qpj8\\nGHSA-2jrp-274c-jhv3"';
+        expect(domScanner.hasMatchingPattern(jsonText)).toBe(true);
+      });
+
+      it('should match multiple pattern types in \\n-delimited JSON aliases', async () => {
+        const mockPatterns = {
+          patterns: [
+            '/\\bCVE-\\d{4}-\\d{4,7}\\b/gi',
+            '/\\bGHSA-[0-9A-Za-z]{4}-[0-9A-Za-z]{4}-[0-9A-Za-z]{4}\\b/gi',
+            '/\\bEUVD-\\d{4}-\\d+\\b/gi',
+          ],
+        };
+        (mockChrome.runtime.sendMessage as jest.Mock).mockResolvedValueOnce(
+          mockPatterns
+        );
+
+        await domScanner.loadPatterns();
+
+        // Simulates EUVD API aliases field with mixed identifier types
+        const jsonText =
+          '"aliases":"CVE-2026-2558\\nGHSA-25fq-6qgg-qpj8\\nEUVD-2026-6085"';
+        expect(domScanner.hasMatchingPattern(jsonText)).toBe(true);
+      });
+
+      it('should strip \\b from patterns without affecting other assertions', async () => {
+        // Pattern with non-\\b assertions (like \\d, \\s) should be preserved
+        const mockPatterns = {
+          patterns: ['/\\bEDB-?ID:\\s*\\d+\\b/gi'],
+        };
+        (mockChrome.runtime.sendMessage as jest.Mock).mockResolvedValueOnce(
+          mockPatterns
+        );
+
+        await domScanner.loadPatterns();
+
+        const patterns = (domScanner as any).patterns as RegExp[];
+        // \\b removed, but \\s and \\d preserved
+        expect(patterns[0].source).not.toContain('\\b');
+        expect(patterns[0].source).toContain('\\s');
+        expect(patterns[0].source).toContain('\\d');
+        expect(domScanner.hasMatchingPattern('EDB-ID: 12345')).toBe(true);
+      });
+
+      it('should build combined pattern after API load', async () => {
+        const mockPatterns = {
+          patterns: ['/CVE-\\d{4}-\\d{4,7}/gi'],
+        };
+        (mockChrome.runtime.sendMessage as jest.Mock).mockResolvedValueOnce(
+          mockPatterns
+        );
+
+        await domScanner.loadPatterns();
+        // combinedPattern should be built (not null)
+        expect((domScanner as any).combinedPattern).not.toBeNull();
+      });
+
+      it('should build combined pattern with multiple API patterns', async () => {
+        const mockPatterns = {
+          patterns: [
+            '/CVE-\\d{4}-\\d{4,7}/gi',
+            '/GHSA-[0-9A-Za-z]{4}-[0-9A-Za-z]{4}-[0-9A-Za-z]{4}/gi',
+          ],
+        };
+        (mockChrome.runtime.sendMessage as jest.Mock).mockResolvedValueOnce(
+          mockPatterns
+        );
+
+        await domScanner.loadPatterns();
+
+        const combined = (domScanner as any).combinedPattern as RegExp;
+        expect(combined).not.toBeNull();
+        // Combined pattern should match both CVE and GHSA
+        combined.lastIndex = 0;
+        expect(combined.test('CVE-2024-1234')).toBe(true);
+        combined.lastIndex = 0;
+        expect(combined.test('GHSA-abcd-1234-efgh')).toBe(true);
+      });
+
       it('should use fallback pattern on failure', async () => {
         (mockChrome.runtime.sendMessage as jest.Mock).mockResolvedValueOnce({
           patterns: null,
@@ -651,6 +779,142 @@ describe('CVEHighlighter Content Script', () => {
 
         const counts = domScanner.getBulletinTypeCounts();
         expect(counts.cve).toBe(1);
+      });
+    });
+
+    describe('highlightCVEsInNode with API patterns (\\b stripped)', () => {
+      beforeEach(async () => {
+        const mockPatterns = {
+          patterns: [
+            '/\\bCVE-\\d{4}-\\d{4,7}\\b/gi',
+            '/\\bGHSA-[0-9A-Za-z]{4}-[0-9A-Za-z]{4}-[0-9A-Za-z]{4}\\b/gi',
+            '/\\bEUVD-\\d{4}-\\d+\\b/gi',
+          ],
+        };
+        (mockChrome.runtime.sendMessage as jest.Mock).mockResolvedValueOnce(
+          mockPatterns
+        );
+        await domScanner.loadPatterns();
+      });
+
+      it('should highlight all CVEs in \\n-delimited JSON text', () => {
+        document.body.innerHTML =
+          '<pre id="test">"aliases":"CVE-2026-2558\\nCVE-2026-25581\\nCVE-2026-25580"</pre>';
+        const textNode = document.getElementById('test')!.firstChild as Text;
+
+        domScanner.highlightCVEsInNode(textNode);
+
+        const bulletins = domScanner.getHighlightedBulletins();
+        expect(bulletins.has('CVE-2026-2558')).toBe(true);
+        expect(bulletins.has('CVE-2026-25581')).toBe(true);
+        expect(bulletins.has('CVE-2026-25580')).toBe(true);
+        expect(bulletins.size).toBe(3);
+      });
+
+      it('should highlight all GHSAs in \\n-delimited JSON text', () => {
+        document.body.innerHTML =
+          '<pre id="test">"aliases":"GHSA-25fq-6qgg-qpj8\\nGHSA-2jrp-274c-jhv3\\nGHSA-66h4-qj4x-38xp"</pre>';
+        const textNode = document.getElementById('test')!.firstChild as Text;
+
+        domScanner.highlightCVEsInNode(textNode);
+
+        const bulletins = domScanner.getHighlightedBulletins();
+        expect(bulletins.has('GHSA-25FQ-6QGG-QPJ8')).toBe(true);
+        expect(bulletins.has('GHSA-2JRP-274C-JHV3')).toBe(true);
+        expect(bulletins.has('GHSA-66H4-QJ4X-38XP')).toBe(true);
+        expect(bulletins.size).toBe(3);
+      });
+
+      it('should highlight mixed CVE and GHSA in \\n-delimited JSON text', () => {
+        document.body.innerHTML =
+          '<pre id="test">"aliases":"CVE-2026-2558\\nGHSA-25fq-6qgg-qpj8\\nCVE-2026-25581\\nGHSA-2jrp-274c-jhv3"</pre>';
+        const textNode = document.getElementById('test')!.firstChild as Text;
+
+        domScanner.highlightCVEsInNode(textNode);
+
+        const bulletins = domScanner.getHighlightedBulletins();
+        expect(bulletins.has('CVE-2026-2558')).toBe(true);
+        expect(bulletins.has('GHSA-25FQ-6QGG-QPJ8')).toBe(true);
+        expect(bulletins.has('CVE-2026-25581')).toBe(true);
+        expect(bulletins.has('GHSA-2JRP-274C-JHV3')).toBe(true);
+        expect(bulletins.size).toBe(4);
+      });
+
+      it('should classify GHSA as advisory type', () => {
+        document.body.innerHTML =
+          '<pre id="test">"id":"GHSA-25fq-6qgg-qpj8"</pre>';
+        const textNode = document.getElementById('test')!.firstChild as Text;
+
+        domScanner.highlightCVEsInNode(textNode);
+
+        const counts = domScanner.getBulletinTypeCounts();
+        expect(counts.advisory).toBe(1);
+        expect(counts.cve).toBe(0);
+      });
+
+      it('should classify EUVD as advisory type', () => {
+        document.body.innerHTML =
+          '<pre id="test">"enisa_id":"EUVD-2026-6085"</pre>';
+        const textNode = document.getElementById('test')!.firstChild as Text;
+
+        domScanner.highlightCVEsInNode(textNode);
+
+        const counts = domScanner.getBulletinTypeCounts();
+        expect(counts.advisory).toBe(1);
+      });
+
+      it('should handle full EUVD API aliases field', () => {
+        // Realistic reproduction of the EUVD API response aliases field
+        const aliases = [
+          'CVE-2026-2558',
+          'GHSA-25fq-6qgg-qpj8',
+          'CVE-2026-25581',
+          'GHSA-2jrp-274c-jhv3',
+          'CVE-2026-25580',
+          'GHSA-66h4-qj4x-38xp',
+          'CVE-2026-25587',
+          'GHSA-jjpw-65fv-8g48',
+          'CVE-2026-25586',
+          'GHSA-rg64-8mrm-6x23',
+        ].join('\\n');
+
+        document.body.innerHTML = `<pre id="test">"aliases":"${aliases}"</pre>`;
+        const textNode = document.getElementById('test')!.firstChild as Text;
+
+        domScanner.highlightCVEsInNode(textNode);
+
+        const bulletins = domScanner.getHighlightedBulletins();
+        expect(bulletins.size).toBe(10);
+        // Verify all CVEs found
+        expect(bulletins.has('CVE-2026-2558')).toBe(true);
+        expect(bulletins.has('CVE-2026-25581')).toBe(true);
+        expect(bulletins.has('CVE-2026-25580')).toBe(true);
+        expect(bulletins.has('CVE-2026-25587')).toBe(true);
+        expect(bulletins.has('CVE-2026-25586')).toBe(true);
+        // Verify all GHSAs found (uppercased by highlightCVEsInNode)
+        expect(bulletins.has('GHSA-25FQ-6QGG-QPJ8')).toBe(true);
+        expect(bulletins.has('GHSA-2JRP-274C-JHV3')).toBe(true);
+        expect(bulletins.has('GHSA-66H4-QJ4X-38XP')).toBe(true);
+        expect(bulletins.has('GHSA-JJPW-65FV-8G48')).toBe(true);
+        expect(bulletins.has('GHSA-RG64-8MRM-6X23')).toBe(true);
+
+        // Verify type counts
+        const counts = domScanner.getBulletinTypeCounts();
+        expect(counts.cve).toBe(5);
+        expect(counts.advisory).toBe(5);
+      });
+
+      it('should still match identifiers in normal HTML text', () => {
+        document.body.innerHTML =
+          '<div id="test">Found CVE-2024-1234 and GHSA-abcd-1234-efgh on the page</div>';
+        const textNode = document.getElementById('test')!.firstChild as Text;
+
+        domScanner.highlightCVEsInNode(textNode);
+
+        const bulletins = domScanner.getHighlightedBulletins();
+        expect(bulletins.has('CVE-2024-1234')).toBe(true);
+        expect(bulletins.has('GHSA-ABCD-1234-EFGH')).toBe(true);
+        expect(bulletins.size).toBe(2);
       });
     });
 
